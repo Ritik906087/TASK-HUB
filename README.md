@@ -44,12 +44,12 @@ Configured via `netlify.toml` + `netlify/functions/api.ts`:
 2. Build command: `npm run build` · Publish directory: `dist` · Functions directory: `netlify/functions`.
 3. Add `DATABASE_URL` and secrets under **Site configuration → Environment variables**.
 
-### 4. Cloudflare Pages
-Configured via `wrangler.toml`, `functions/api/[[path]].ts`, and `public/_redirects`:
-1. Connect `Ritik906087/TASK-HUB` in **Cloudflare Dashboard → Workers & Pages → Create → Pages**.
-2. Build command: `npm run build` · Build output directory: `dist`.
-3. Set `BACKEND_API_URL` (e.g. your Render backend URL) under **Settings → Environment Variables** so `/api/*` proxies seamlessly to your PostgreSQL backend.
-   *(Optionally set `ALLOWED_ORIGINS` on your Render backend to your `*.pages.dev` URL.)*
+### 4. Cloudflare Workers & Pages
+Configured via `wrangler.toml` (`[assets]` + `cloudflare/worker.ts`) and `functions/api/[[path]].ts`:
+1. Connect `Ritik906087/TASK-HUB` in **Cloudflare Dashboard → Workers & Pages → Create**.
+2. Build command: `npm run build` · Deploy command: `npx wrangler deploy` (for Workers) or `npx wrangler pages deploy dist` (for Pages).
+3. Set `BACKEND_API_URL` (e.g. your Render backend URL) under **Settings → Variables and Secrets** so `/api/*` proxies seamlessly to your PostgreSQL backend.
+   *(Optionally set `ALLOWED_ORIGINS` on your Render backend to your `*.workers.dev` or `*.pages.dev` URL.)*
 
 ---
 
