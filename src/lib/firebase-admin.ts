@@ -32,7 +32,7 @@ function resolveProjectId(): string | undefined {
     }
   }
 
-  return undefined;
+  return 'primeval-accord-dbcxw';
 }
 
 let cachedAuth: Auth | null = null;
