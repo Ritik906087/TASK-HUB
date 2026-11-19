@@ -41,6 +41,12 @@ export async function ensureDatabaseBootstrapped(): Promise<void> {
 
   initPromise = (async () => {
     try {
+      if (!process.env.SQL_HOST && !process.env.DATABASE_URL && !process.env.POSTGRES_URL) {
+        throw new Error(
+          'PostgreSQL database is not configured. Set DATABASE_URL (or SQL_HOST) in environment variables.'
+        );
+      }
+
       // 1. Ensure default admin user exists
       const existingAdmins = await db.select({ total: count() }).from(adminUsers);
       if ((existingAdmins[0]?.total ?? 0) === 0) {

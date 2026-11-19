@@ -1,11 +1,18 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 
-const BASE_SECRET = process.env.SESSION_SECRET || 'taskhub-cloudsql-hmac-secret-2026';
+const BASE_SECRET =
+  process.env.SESSION_SECRET || process.env.JWT_SECRET || 'taskhub-cloudsql-hmac-secret-2026';
 const USER_SECRET = crypto.createHash('sha256').update(`user:${BASE_SECRET}`).digest();
-const ADMIN_SECRET = crypto.createHash('sha256').update(`admin:${BASE_SECRET}`).digest();
+const ADMIN_SECRET = crypto
+  .createHash('sha256')
+  .update(`admin:${process.env.ADMIN_JWT_SECRET || BASE_SECRET}`)
+  .digest();
 const CAPTCHA_SECRET = crypto.createHash('sha256').update(`captcha:${BASE_SECRET}`).digest();
-const AES_KEY = crypto.createHash('sha256').update(`aes:${BASE_SECRET}`).digest();
+const AES_KEY = crypto
+  .createHash('sha256')
+  .update(`aes:${process.env.APP_ENCRYPTION_KEY || BASE_SECRET}`)
+  .digest();
 
 export interface UserTokenPayload {
   sub: number;
