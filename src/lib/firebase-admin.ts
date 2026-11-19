@@ -9,10 +9,17 @@ function resolveProjectId(): string | undefined {
     return process.env.FIREBASE_PROJECT_ID;
   }
 
-  const candidates = [
-    path.resolve(process.cwd(), 'firebase-applet-config.json'),
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../firebase-applet-config.json'),
-  ];
+  const candidates = [path.resolve(process.cwd(), 'firebase-applet-config.json')];
+
+  try {
+    if (typeof import.meta !== 'undefined' && typeof import.meta.url === 'string') {
+      candidates.push(
+        path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../firebase-applet-config.json')
+      );
+    }
+  } catch {
+    // ignore in CJS bundles
+  }
 
   for (const filePath of candidates) {
     try {

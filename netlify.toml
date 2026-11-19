@@ -5,6 +5,7 @@
 
 [functions]
   node_bundler = "esbuild"
+  external_node_modules = ["express", "pg", "bcryptjs", "multer", "firebase-admin", "dotenv", "serverless-http", "drizzle-orm"]
   included_files = ["firebase-applet-config.json"]
 
 [[redirects]]
