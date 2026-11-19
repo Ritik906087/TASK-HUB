@@ -290,11 +290,20 @@ export async function ensureDatabaseBootstrapped(): Promise<void> {
         );
       }
 
-      // 0. Auto-create missing tables/indexes on fresh databases (Neon, Supabase, Render, etc.)
-      await pool.query(SCHEMA_SQL);
-
-      // 1. Ensure default admin user exists
-      const existingAdmins = await db.select({ total: count() }).from(adminUsers);
+      // 1. Check if tables exist; only auto-create schema on fresh DBs where relation is missing (42P01)
+      let existingAdmins;
+      try {
+        existingAdmins = await db.select({ total: count() }).from(adminUsers);
+      } catch (tableErr: unknown) {
+        const errCode = (tableErr as { code?: string })?.code;
+        const errMsg = tableErr instanceof Error ? tableErr.message : '';
+        if (errCode === '42P01' || errMsg.includes('does not exist')) {
+          await pool.query(SCHEMA_SQL);
+          existingAdmins = await db.select({ total: count() }).from(adminUsers);
+        } else {
+          throw tableErr;
+        }
+      }
       if ((existingAdmins[0]?.total ?? 0) === 0) {
         const defaultPass = process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123456';
         const hash = await bcrypt.hash(defaultPass, 10);
