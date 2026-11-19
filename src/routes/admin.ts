@@ -84,7 +84,18 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Admin login error:', err);
-    res.status(500).json({ error: 'Admin login failed' });
+    const msg = err instanceof Error ? err.message : '';
+    const isConfigErr =
+      msg.includes('not configured') ||
+      msg.includes('connect') ||
+      msg.includes('ECONNREFUSED') ||
+      msg.includes('ENOTFOUND') ||
+      msg.includes('password authentication');
+    res.status(500).json({
+      error: isConfigErr
+        ? `Database connection error: ${msg.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]')}`
+        : 'Admin login failed',
+    });
   }
 });
 

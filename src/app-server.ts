@@ -5,6 +5,8 @@ import userRoutes from './routes/user.ts';
 import adminRoutes from './routes/admin.ts';
 import mediaRoutes from './routes/media.ts';
 
+import { ensureDatabaseBootstrapped, sanitizeDbError } from './db/bootstrap.ts';
+
 export function createApiApp(): express.Express {
   const app = express();
 
@@ -36,7 +38,20 @@ export function createApiApp(): express.Express {
   });
 
   // Health check
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', async (req, res) => {
+    if (req.query.db === '1') {
+      try {
+        await ensureDatabaseBootstrapped();
+        return res.json({ status: 'ok', app: 'TASK HUB', db: 'connected' });
+      } catch (err) {
+        return res.status(500).json({
+          status: 'error',
+          app: 'TASK HUB',
+          db: 'disconnected',
+          error: sanitizeDbError(err),
+        });
+      }
+    }
     res.json({ status: 'ok', app: 'TASK HUB' });
   });
 

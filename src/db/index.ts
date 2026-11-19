@@ -21,7 +21,8 @@ function isTransientIdleError(err: unknown): boolean {
 
 export const createPool = () => {
   if (!global._postgresPool) {
-    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    const rawConn = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+    const connectionString = rawConn.trim().replace(/^['"]|['"]$/g, '');
     const baseConfig = {
       max: 5,
       idleTimeoutMillis: 15000,

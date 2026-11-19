@@ -1,8 +1,251 @@
 import bcrypt from 'bcryptjs';
 import { count, eq } from 'drizzle-orm';
-import { db } from './index.ts';
+import { db, pool } from './index.ts';
 import { adminUsers, appSettings, tasks, transactions, users } from './schema.ts';
 import { generateUid } from '../lib/security.ts';
+
+const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS "users" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "uid" text NOT NULL UNIQUE,
+  "firebase_uid" text UNIQUE,
+  "phone" text NOT NULL UNIQUE,
+  "password_hash" text NOT NULL,
+  "full_name" text DEFAULT 'Task Hub Member' NOT NULL,
+  "email" text,
+  "referral_code" text NOT NULL UNIQUE,
+  "referred_by_user_id" integer,
+  "referral_valid" boolean DEFAULT false NOT NULL,
+  "status" text DEFAULT 'active' NOT NULL,
+  "last_login_ip" text,
+  "device_fingerprint" text,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "users_phone_idx" ON "users" ("phone");
+CREATE INDEX IF NOT EXISTS "users_referral_code_idx" ON "users" ("referral_code");
+CREATE INDEX IF NOT EXISTS "users_referred_by_idx" ON "users" ("referred_by_user_id");
+
+CREATE TABLE IF NOT EXISTS "admin_users" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "username" text NOT NULL UNIQUE,
+  "email" text NOT NULL UNIQUE,
+  "password_hash" text NOT NULL,
+  "role" text DEFAULT 'super_admin' NOT NULL,
+  "status" text DEFAULT 'active' NOT NULL,
+  "last_login_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "tasks" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "title" text NOT NULL,
+  "category" text NOT NULL,
+  "icon_url" text,
+  "description" text NOT NULL,
+  "instructions" text NOT NULL,
+  "external_link" text NOT NULL,
+  "reward_amount" numeric(12, 2) NOT NULL,
+  "video_urls" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "photo_urls" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "daily_limit" integer DEFAULT 100 NOT NULL,
+  "total_limit" integer DEFAULT 5000 NOT NULL,
+  "completed_count" integer DEFAULT 0 NOT NULL,
+  "is_active" boolean DEFAULT true NOT NULL,
+  "created_by_admin_id" integer REFERENCES "admin_users"("id"),
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "tasks_category_idx" ON "tasks" ("category");
+CREATE INDEX IF NOT EXISTS "tasks_active_idx" ON "tasks" ("is_active");
+
+CREATE TABLE IF NOT EXISTS "task_submissions" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "task_id" integer NOT NULL REFERENCES "tasks"("id") ON DELETE CASCADE,
+  "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "status" text DEFAULT 'submitted' NOT NULL,
+  "proof_text" text,
+  "proof_file_url" text,
+  "link_visited" boolean DEFAULT false NOT NULL,
+  "reward_credited" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "admin_remarks" text,
+  "reviewed_by_admin_id" integer REFERENCES "admin_users"("id"),
+  "submitted_at" timestamp DEFAULT now() NOT NULL,
+  "reviewed_at" timestamp
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "task_submissions_task_user_uniq" ON "task_submissions" ("task_id", "user_id");
+CREATE INDEX IF NOT EXISTS "task_submissions_user_idx" ON "task_submissions" ("user_id");
+CREATE INDEX IF NOT EXISTS "task_submissions_status_idx" ON "task_submissions" ("status");
+
+CREATE TABLE IF NOT EXISTS "task_comments" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "task_id" integer NOT NULL REFERENCES "tasks"("id") ON DELETE CASCADE,
+  "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "message" text NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "task_comments_task_idx" ON "task_comments" ("task_id");
+
+CREATE TABLE IF NOT EXISTS "referrals" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "sponsor_user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "referred_user_id" integer NOT NULL UNIQUE REFERENCES "users"("id") ON DELETE CASCADE,
+  "referral_code_used" text NOT NULL,
+  "is_valid" boolean DEFAULT false NOT NULL,
+  "invalid_reason" text,
+  "validated_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "referrals_sponsor_idx" ON "referrals" ("sponsor_user_id");
+
+CREATE TABLE IF NOT EXISTS "referral_commissions" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "sponsor_user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "source_user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "source_type" text NOT NULL,
+  "task_submission_id" integer REFERENCES "task_submissions"("id"),
+  "level" integer DEFAULT 1 NOT NULL,
+  "rate_percent" numeric(5, 2) NOT NULL,
+  "amount" numeric(12, 2) NOT NULL,
+  "status" text DEFAULT 'credited' NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "ref_comm_sponsor_idx" ON "referral_commissions" ("sponsor_user_id");
+CREATE INDEX IF NOT EXISTS "ref_comm_source_idx" ON "referral_commissions" ("source_user_id");
+
+CREATE TABLE IF NOT EXISTS "wallets" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "user_id" integer NOT NULL UNIQUE REFERENCES "users"("id") ON DELETE CASCADE,
+  "balance" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "locked_balance" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "total_task_earnings" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "total_referral_earnings" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "total_team_earnings" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "total_other_rewards" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "total_withdrawn" numeric(12, 2) DEFAULT '0.00' NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "transactions" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "tx_code" text NOT NULL UNIQUE,
+  "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "direction" text NOT NULL,
+  "category" text NOT NULL,
+  "amount" numeric(12, 2) NOT NULL,
+  "balance_before" numeric(12, 2) NOT NULL,
+  "balance_after" numeric(12, 2) NOT NULL,
+  "related_uid" text,
+  "reference_id" text,
+  "status" text DEFAULT 'completed' NOT NULL,
+  "description" text NOT NULL,
+  "created_by_admin_id" integer REFERENCES "admin_users"("id"),
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "transactions_user_idx" ON "transactions" ("user_id");
+CREATE INDEX IF NOT EXISTS "transactions_direction_idx" ON "transactions" ("direction");
+CREATE INDEX IF NOT EXISTS "transactions_category_idx" ON "transactions" ("category");
+CREATE INDEX IF NOT EXISTS "transactions_created_idx" ON "transactions" ("created_at");
+
+CREATE TABLE IF NOT EXISTS "withdrawals" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "request_code" text NOT NULL UNIQUE,
+  "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "amount" numeric(12, 2) NOT NULL,
+  "method" text NOT NULL,
+  "account_snapshot" jsonb NOT NULL,
+  "status" text DEFAULT 'pending' NOT NULL,
+  "admin_remarks" text,
+  "processed_by_admin_id" integer REFERENCES "admin_users"("id"),
+  "processed_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "withdrawals_user_idx" ON "withdrawals" ("user_id");
+CREATE INDEX IF NOT EXISTS "withdrawals_status_idx" ON "withdrawals" ("status");
+
+CREATE TABLE IF NOT EXISTS "bank_accounts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "user_id" integer NOT NULL UNIQUE REFERENCES "users"("id") ON DELETE CASCADE,
+  "account_holder_name" text NOT NULL,
+  "bank_name" text NOT NULL,
+  "account_number_encrypted" text NOT NULL,
+  "account_number_last4" text NOT NULL,
+  "ifsc_code" text NOT NULL,
+  "is_verified" boolean DEFAULT true NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "upi_accounts" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "user_id" integer NOT NULL UNIQUE REFERENCES "users"("id") ON DELETE CASCADE,
+  "upi_id" text NOT NULL,
+  "holder_name" text NOT NULL,
+  "is_verified" boolean DEFAULT true NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL,
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "app_settings" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "key" text NOT NULL UNIQUE,
+  "value" jsonb NOT NULL,
+  "updated_by_admin_id" integer REFERENCES "admin_users"("id"),
+  "updated_at" timestamp DEFAULT now() NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "notifications" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "user_id" integer NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+  "title" text NOT NULL,
+  "message" text NOT NULL,
+  "type" text DEFAULT 'system' NOT NULL,
+  "is_read" boolean DEFAULT false NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "notifications_user_idx" ON "notifications" ("user_id");
+
+CREATE TABLE IF NOT EXISTS "audit_logs" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "actor_type" text NOT NULL,
+  "actor_id" integer NOT NULL,
+  "action" text NOT NULL,
+  "target_type" text NOT NULL,
+  "target_id" text NOT NULL,
+  "details" jsonb,
+  "ip_address" text,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "audit_logs_created_idx" ON "audit_logs" ("created_at");
+
+CREATE TABLE IF NOT EXISTS "otp_codes" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "phone" text NOT NULL,
+  "code_hash" text NOT NULL,
+  "purpose" text DEFAULT 'forgot_password' NOT NULL,
+  "attempts" integer DEFAULT 0 NOT NULL,
+  "expires_at" timestamp NOT NULL,
+  "used_at" timestamp,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "otp_codes_phone_idx" ON "otp_codes" ("phone");
+
+CREATE TABLE IF NOT EXISTS "media_files" (
+  "id" serial PRIMARY KEY NOT NULL,
+  "file_name" text NOT NULL,
+  "mime_type" text NOT NULL,
+  "data_base64" text NOT NULL,
+  "size_bytes" integer NOT NULL,
+  "uploaded_by" text NOT NULL,
+  "created_at" timestamp DEFAULT now() NOT NULL
+);
+`;
+
+export function sanitizeDbError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || 'Database error');
+  return raw.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]');
+}
 
 export interface AppSettingsMap {
   minWithdrawal: number;
@@ -46,6 +289,9 @@ export async function ensureDatabaseBootstrapped(): Promise<void> {
           'PostgreSQL database is not configured. Set DATABASE_URL (or SQL_HOST) in environment variables.'
         );
       }
+
+      // 0. Auto-create missing tables/indexes on fresh databases (Neon, Supabase, Render, etc.)
+      await pool.query(SCHEMA_SQL);
 
       // 1. Ensure default admin user exists
       const existingAdmins = await db.select({ total: count() }).from(adminUsers);
