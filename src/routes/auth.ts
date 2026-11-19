@@ -13,7 +13,7 @@ import {
   users,
   wallets,
 } from '../db/schema.ts';
-import { ensureDatabaseBootstrapped, getAppSettings, logAudit } from '../db/bootstrap.ts';
+import { ensureDatabaseBootstrapped, getAppSettings, logAudit, sanitizeDbError } from '../db/bootstrap.ts';
 import {
   createRateLimiter,
   generateMathCaptcha,
@@ -247,17 +247,19 @@ router.post('/register', authLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Register error:', err);
-    const msg = err instanceof Error ? err.message : '';
+    const cleaned = sanitizeDbError(err);
     const isDbErr =
-      msg.includes('not configured') ||
-      msg.includes('connect') ||
-      msg.includes('ECONNREFUSED') ||
-      msg.includes('ENOTFOUND') ||
-      msg.includes('password authentication');
+      cleaned.includes('not configured') ||
+      cleaned.includes('connect') ||
+      cleaned.includes('ECONN') ||
+      cleaned.includes('ENOTFOUND') ||
+      cleaned.includes('ETIMEDOUT') ||
+      cleaned.includes('password authentication') ||
+      cleaned.includes('does not exist') ||
+      cleaned.includes('SSL') ||
+      cleaned.includes('Failed query');
     res.status(500).json({
-      error: isDbErr
-        ? `Database connection error: ${msg.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]')}`
-        : 'Registration failed. Please try again.',
+      error: isDbErr ? `Database error: ${cleaned}` : 'Registration failed. Please try again.',
     });
   }
 });
@@ -306,17 +308,19 @@ router.post('/login', authLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Login error:', err);
-    const msg = err instanceof Error ? err.message : '';
+    const cleaned = sanitizeDbError(err);
     const isDbErr =
-      msg.includes('not configured') ||
-      msg.includes('connect') ||
-      msg.includes('ECONNREFUSED') ||
-      msg.includes('ENOTFOUND') ||
-      msg.includes('password authentication');
+      cleaned.includes('not configured') ||
+      cleaned.includes('connect') ||
+      cleaned.includes('ECONN') ||
+      cleaned.includes('ENOTFOUND') ||
+      cleaned.includes('ETIMEDOUT') ||
+      cleaned.includes('password authentication') ||
+      cleaned.includes('does not exist') ||
+      cleaned.includes('SSL') ||
+      cleaned.includes('Failed query');
     res.status(500).json({
-      error: isDbErr
-        ? `Database connection error: ${msg.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]')}`
-        : 'Login failed. Please try again.',
+      error: isDbErr ? `Database error: ${cleaned}` : 'Login failed. Please try again.',
     });
   }
 });

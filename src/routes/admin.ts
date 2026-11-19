@@ -20,6 +20,7 @@ import {
   ensureDatabaseBootstrapped,
   getAppSettings,
   logAudit,
+  sanitizeDbError,
   updateAppSetting,
   type AppSettingsMap,
 } from '../db/bootstrap.ts';
@@ -84,17 +85,19 @@ router.post('/login', adminLoginLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Admin login error:', err);
-    const msg = err instanceof Error ? err.message : '';
-    const isConfigErr =
-      msg.includes('not configured') ||
-      msg.includes('connect') ||
-      msg.includes('ECONNREFUSED') ||
-      msg.includes('ENOTFOUND') ||
-      msg.includes('password authentication');
+    const cleaned = sanitizeDbError(err);
+    const isDbErr =
+      cleaned.includes('not configured') ||
+      cleaned.includes('connect') ||
+      cleaned.includes('ECONN') ||
+      cleaned.includes('ENOTFOUND') ||
+      cleaned.includes('ETIMEDOUT') ||
+      cleaned.includes('password authentication') ||
+      cleaned.includes('does not exist') ||
+      cleaned.includes('SSL') ||
+      cleaned.includes('Failed query');
     res.status(500).json({
-      error: isConfigErr
-        ? `Database connection error: ${msg.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]')}`
-        : 'Admin login failed',
+      error: isDbErr ? `Database error: ${cleaned}` : 'Admin login failed',
     });
   }
 });

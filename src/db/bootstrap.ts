@@ -242,9 +242,30 @@ CREATE TABLE IF NOT EXISTS "media_files" (
 );
 `;
 
+export function unwrapDbError(err: unknown): { code?: string; message: string } {
+  let cur: unknown = err;
+  const messages: string[] = [];
+  let code: string | undefined;
+
+  for (let depth = 0; depth < 4 && cur && typeof cur === 'object'; depth++) {
+    const obj = cur as { code?: unknown; message?: unknown; cause?: unknown };
+    if (!code && typeof obj.code === 'string') {
+      code = obj.code;
+    }
+    if (typeof obj.message === 'string' && obj.message) {
+      messages.push(obj.message);
+    }
+    cur = obj.cause;
+  }
+
+  const combined = messages.length > 0 ? messages.join(' | ') : String(err || 'Database error');
+  return { code, message: combined };
+}
+
 export function sanitizeDbError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err || 'Database error');
-  return raw.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]');
+  const { code, message } = unwrapDbError(err);
+  const cleaned = message.replace(/postgres(?:ql)?:\/\/[^\s'"]+/gi, '[database-url]');
+  return code ? `[${code}] ${cleaned}` : cleaned;
 }
 
 export interface AppSettingsMap {
@@ -290,20 +311,15 @@ export async function ensureDatabaseBootstrapped(): Promise<void> {
         );
       }
 
-      // 1. Check if tables exist; only auto-create schema on fresh DBs where relation is missing (42P01)
-      let existingAdmins;
-      try {
-        existingAdmins = await db.select({ total: count() }).from(adminUsers);
-      } catch (tableErr: unknown) {
-        const errCode = (tableErr as { code?: string })?.code;
-        const errMsg = tableErr instanceof Error ? tableErr.message : '';
-        if (errCode === '42P01' || errMsg.includes('does not exist')) {
-          await pool.query(SCHEMA_SQL);
-          existingAdmins = await db.select({ total: count() }).from(adminUsers);
-        } else {
-          throw tableErr;
-        }
+      // 1. Check if tables exist using to_regclass (avoids CREATE permission errors on Cloud SQL)
+      const regCheck = await pool.query<{ tbl: string | null }>(
+        `SELECT to_regclass('public.admin_users') AS tbl`
+      );
+      if (!regCheck.rows[0]?.tbl) {
+        await pool.query(SCHEMA_SQL);
       }
+
+      const existingAdmins = await db.select({ total: count() }).from(adminUsers);
       if ((existingAdmins[0]?.total ?? 0) === 0) {
         const defaultPass = process.env.ADMIN_DEFAULT_PASSWORD || 'Admin@123456';
         const hash = await bcrypt.hash(defaultPass, 10);
