@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+uploads/
+.DS_Store
+*.log
+.env*
+!.env.example
+public/assets/aistudio/
+TASK-HUB.apk
+android-app/.gradle/
+android-app/build/
+android-app/app/build/
+android-app/local.properties

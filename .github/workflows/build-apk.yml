@@ -1,0 +1,67 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: "Live TASK HUB Web App URL for the Android WebView"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build Debug APK
+        working-directory: android-app
+        env:
+          INPUT_URL: ${{ github.event.inputs.app_url }}
+          VAR_URL: ${{ vars.APP_URL }}
+        run: |
+          TARGET_URL="${INPUT_URL:-$VAR_URL}"
+          if [ -n "$TARGET_URL" ]; then
+            gradle assembleDebug -PAPP_URL="$TARGET_URL"
+          else
+            gradle assembleDebug
+          fi
+          cp app/build/outputs/apk/debug/app-debug.apk ../TASK-HUB.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TASK-HUB-apk
+          path: TASK-HUB.apk
+
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: TASK HUB Android APK (Latest)
+          body: "Automated Android WebView APK build for TASK HUB."
+          files: TASK-HUB.apk
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,6 @@
+{
+  "name": "TASK HUB",
+  "description": "TASK HUB — Complete task-based earning platform with verified micro-tasks, referral rewards, wallet management, and instant UPI & bank withdrawals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
